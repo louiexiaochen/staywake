@@ -21,35 +21,53 @@ claude
 
 ## Supported agents
 
-Out of the box, **zero config needed**:
+**16 agents** ship with built-in detection — same set as
+[CodeIsland](https://github.com/cloud-island/CodeIsland).
 
-| Agent | How it's detected | Idle threshold | Source |
-|---|---|---|---|
-| **Claude Code** (CLI) | `~/.claude/projects/**/*.jsonl` mtime | 300 s | builtin monitor `claude_code` |
-| **Claude Code** (alt session dir) | `~/.claude/sessions/**/*.jsonl` mtime | 300 s | builtin monitor `claude_code_logs` |
-| **OpenAI Codex CLI** | `~/.codex/sessions/**/rollout-*.jsonl` mtime | 90 s | builtin monitor `codex` |
+### Transcript-watched (zero config, on by default)
 
-The 300/90 s thresholds are tuned to ride out long thinking pauses without
-prematurely "letting go" while the agent is mid-LLM-call.
+These agents write a transcript file as they work; staywake watches the
+file's mtime. Just install staywake and run your agent normally.
 
-### Adding your own agent (no code change)
+| Agent | Path | Idle threshold |
+|---|---|---|
+| **Claude Code** (Anthropic CLI) | `~/.claude/projects/**/*.jsonl` | 300 s |
+| **Codex** (OpenAI CLI) | `~/.codex/sessions/**/rollout-*.jsonl` | 90 s |
+| **Cursor** (IDE agent) | `~/.cursor/projects/**/agent-transcripts/*.jsonl` | 90 s |
+| **Qoder** (Alibaba) | `~/.qoder/projects/**/transcript/*.jsonl` | 90 s |
+| **CodeBuddy** (Tencent) | `~/.codebuddy/projects/**/*.jsonl` | 90 s |
 
-Drop a snippet in `~/.config/staywake/config.toml` (macOS) or
-`%APPDATA%\staywake\config.toml` (Windows):
+300 s / 90 s thresholds are tuned to ride out long thinking pauses without
+prematurely letting go mid-LLM-call.
+
+### Process-scan (opt-in, no transcript needed)
+
+For agents that don't expose a transcript file we ship a curated set of
+`ps` patterns. Enable via `~/.config/staywake/config.toml` →
+`[process_scan]` → `enabled = true, use_builtins = true`. Covers:
+
+| Tool | Detection |
+|---|---|
+| **OpenCode** | `*.app/Contents/MacOS/opencode*`, `~/.opencode/bin/opencode`, `opencode serve` |
+| **Gemini CLI** (Google) | `gemini-cli/bundle/gemini.js`, `/opt/homebrew/bin/gemini` |
+| **GitHub Copilot CLI** | `@github/copilot/npm-loader.js`, `/opt/homebrew/bin/copilot` |
+| **Trae** | `Trae.app`, `~/.trae/`, `/opt/homebrew/bin/trae` |
+| **Trae CN** | `Traecn.app`, `Trae-cn.app`, `~/.traecn/` |
+| **CodeBuddy CN** | `Codebuddycn.app`, `~/.codebuddycn/` |
+| **Droid** (Factory) | `Factory.app`, `~/.local/bin/droid` |
+| **StepFun** | `Stepfun.app`, `~/.stepfun/` |
+| **AntiGravity** | `Antigravity.app`, `~/.antigravity/antigravity/bin/` |
+| **WorkBuddy** | `Workbuddy.app`, `~/.workbuddy/` |
+| **Hermes** | `Hermes.app`, `~/.local/bin/hermes`, `~/.hermes/hermes-agent/` |
+| **OpenWork** | `Openwork.app`, `openwork-orchestrator`, `openwork-server` |
+
+### Adding your own agent
+
+Drop a TOML snippet — no code change:
 
 ```toml
-# Examples — pick whichever matches your tool's log/transcript layout.
-
-[monitors.opencode]
-globs = ["~/.local/share/opencode/sessions/**/*.json*"]
-idle_after_seconds = 120
-
 [monitors.aider]
 globs = ["~/.aider.chat.history.md", "~/**/.aider.chat.history.md"]
-idle_after_seconds = 120
-
-[monitors.cursor_agent]
-globs = ["~/.cursor/logs/agent/**/*.log"]
 idle_after_seconds = 120
 
 [monitors.my_orchestrator]
@@ -57,16 +75,13 @@ globs = ["/var/log/my-pipeline/*.log"]
 idle_after_seconds = 60
 ```
 
-If your tool doesn't write a transcript file at all, you have two more
-escape hatches:
+If your tool writes nothing useful to disk, two more escape hatches:
 
-1. **Wrap the launcher** with `staywake hold` / `staywake release` — works
-   for anything that runs in a shell (see "Manual hold" below).
-2. **Process-scan fallback** — match by `ps` regex; opt-in via
-   `[process_scan]` in the same config file.
+1. **Wrap the launcher** with `staywake hold` / `staywake release`.
+2. **Process-scan with custom regex** — `[process_scan].patterns`.
 
-PRs adding new built-in monitors are welcome — if it ships with a
-predictable transcript path, we'll bake it in.
+PRs adding new built-in monitors are welcome — if the tool ships with a
+predictable transcript path, we bake it in.
 
 ## Why a daemon
 

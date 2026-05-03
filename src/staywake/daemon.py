@@ -11,7 +11,7 @@ from typing import Optional
 
 from .config import Config
 from .control import default_control_path, read_control, resume as resume_control
-from .monitors import build_default_monitors
+from .monitors import build_default_monitors, builtin_process_patterns_flat
 from .platform import SleepGuard
 from .sources import HolderSource, ProcessSource
 from .state import default_state_path
@@ -30,8 +30,14 @@ def run_daemon(
 
     guard = SleepGuard(aggressive=config.aggressive)
     holder_src = HolderSource(state_path, config.stale_after_seconds)
+
+    proc_patterns: list[str] = []
+    if config.process_scan_enabled:
+        if config.process_scan_use_builtins:
+            proc_patterns.extend(builtin_process_patterns_flat())
+        proc_patterns.extend(config.process_scan_patterns)
     proc_src = ProcessSource(
-        config.process_scan_patterns if config.process_scan_enabled else (),
+        proc_patterns,
         config.process_scan_idle_patterns if config.process_scan_enabled else (),
     )
     monitors = build_default_monitors(

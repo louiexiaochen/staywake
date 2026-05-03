@@ -95,35 +95,76 @@ class GlobMonitor:
 # An agent is *not* idle just because the transcript paused. Extended thinking,
 # big LLM calls, slow tool round-trips, and waitingApproval all create gaps in
 # the file-write stream that should NOT be confused with "agent finished".
-# Numbers below are ported from CodeIsland's production tuning:
+# Two tunings ported from CodeIsland production:
 #
-#   * Claude Code (`monitoredThinkingTimeout`): 300s = 5 min. Long thinks
-#     and large-context calls regularly produce 2–4 min silent stretches.
-#   * OpenAI Codex CLI (`nativeAppTranscriptQuietTimeout`): 90s. Turns are
-#     shorter but still bursty; 90s clears most thinking pauses without
-#     leaving the laptop awake forever after the user wandered off.
+#   * `monitoredThinkingTimeout` = 300 s   (Claude Code: long pure-CLI thinks
+#                                           regularly produce 2–4 min silent
+#                                           stretches mid-call)
+#   * `nativeAppTranscriptQuietTimeout` = 90 s   (native-app embedded agents:
+#                                                Codex/Cursor/Qoder/CodeBuddy —
+#                                                turns are bursty but shorter)
 #
 # Override per-monitor in TOML if your workflow differs.
 BUILTIN_MONITORS: dict[str, dict] = {
-    # Claude Code CLI: appends to a JSONL per session under
-    # ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+    # Anthropic Claude Code (CLI) — flat per-session JSONL.
     "claude_code": {
         "globs": ["~/.claude/projects/**/*.jsonl"],
         "idle_after_seconds": 300.0,
     },
-    # OpenAI Codex CLI: rotated rollout files under
-    # ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+    # OpenAI Codex CLI — date-bucketed rollout files.
     "codex": {
         "globs": ["~/.codex/sessions/**/rollout-*.jsonl"],
         "idle_after_seconds": 90.0,
     },
-    # Claude Code's session_id-based plain logs (some setups). Same threshold
-    # as claude_code; harmless if the directory doesn't exist.
-    "claude_code_logs": {
-        "globs": ["~/.claude/sessions/**/*.jsonl"],
-        "idle_after_seconds": 300.0,
+    # Cursor IDE agent transcripts.
+    "cursor_agent": {
+        "globs": ["~/.cursor/projects/**/agent-transcripts/*.jsonl"],
+        "idle_after_seconds": 90.0,
+    },
+    # Qoder (Alibaba) — per-project transcript dir.
+    "qoder": {
+        "globs": ["~/.qoder/projects/**/transcript/*.jsonl"],
+        "idle_after_seconds": 90.0,
+    },
+    # CodeBuddy (Tencent) — flat per-session JSONL under per-project dir.
+    "codebuddy": {
+        "globs": ["~/.codebuddy/projects/**/*.jsonl"],
+        "idle_after_seconds": 90.0,
     },
 }
+
+
+# Process-name patterns ported from CodeIsland's process-detection map.
+# These cover agents that don't write a transcript file (or write to a path
+# we don't know). Kept here so users can enable them via TOML without having
+# to know the regex tricks. Disabled by default to avoid surprising matches.
+BUILTIN_PROCESS_PATTERNS: dict[str, list[str]] = {
+    "claude_code": [r"@anthropic-ai/claude-code/cli\.js", r"\.local/share/claude/versions/"],
+    "codex": [r"\.app/Contents/MacOS/Codex\b", r"@openai/codex"],
+    "cursor": [r"\.app/Contents/MacOS/[Cc]ursor\b", r"\.local/share/cursor-agent/versions/", r"/cursor-agent/index\.js"],
+    "qoder": [r"\.app/Contents/MacOS/[Qq]oder\b", r"/\.qoder/bin/qodercli/"],
+    "codebuddy": [r"\.app/Contents/MacOS/[Cc]odebuddy\b", r"@tencent-ai/codebuddy-code/bin/codebuddy"],
+    "opencode": [r"\.app/Contents/MacOS/[Oo]pen[Cc]ode", r"/\.opencode/bin/opencode\b", r"\bopencode\s+(serve|web)\b"],
+    "gemini_cli": [r"/gemini-cli/bundle/gemini\.js", r"(/opt/homebrew|/usr/local)/bin/gemini\b"],
+    "copilot_cli": [r"@github/copilot/npm-loader\.js", r"(/opt/homebrew|/usr/local)/bin/copilot\b"],
+    "trae": [r"\.app/Contents/MacOS/[Tt]rae\b", r"/\.trae/"],
+    "trae_cn": [r"/[Tt]raecn\.app/Contents/", r"/[Tt]rae-cn\.app/Contents/", r"/\.traecn/"],
+    "codebuddy_cn": [r"/[Cc]odebuddycn\.app/", r"/\.codebuddycn/"],
+    "droid": [r"/[Ff]actory\.app/Contents/MacOS/", r"/\.local/bin/droid\b"],
+    "stepfun": [r"\.app/Contents/MacOS/[Ss]tepfun\b", r"/\.stepfun/"],
+    "antigravity": [r"\.app/Contents/MacOS/[Aa]ntigravity\b", r"/\.antigravity/antigravity/bin/antigravity"],
+    "workbuddy": [r"\.app/Contents/MacOS/[Ww]orkbuddy\b", r"/\.workbuddy/"],
+    "hermes": [r"\.app/Contents/MacOS/[Hh]ermes\b", r"/\.local/bin/hermes\b", r"/\.hermes/hermes-agent/"],
+    "openwork": [r"\.app/Contents/MacOS/[Oo]penwork", r"\bopenwork-(orchestrator|server)\b"],
+}
+
+
+def builtin_process_patterns_flat() -> list[str]:
+    """Flatten BUILTIN_PROCESS_PATTERNS into a single list for ProcessSource."""
+    out: list[str] = []
+    for patterns in BUILTIN_PROCESS_PATTERNS.values():
+        out.extend(patterns)
+    return out
 
 
 def build_default_monitors(

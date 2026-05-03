@@ -9,55 +9,83 @@ interval_seconds = 2.0
 # A holder whose `updatedAt` is older than this is treated as dead.
 stale_after_seconds = 600
 
-# Stronger sleep blocking. On macOS toggles `pmset disablesleep` (root only);
-# on Windows toggles the lid action via `powercfg` (admin only).
+# Stronger sleep blocking. macOS: also toggles `pmset disablesleep` (root).
+# Windows: also toggles the lid action via `powercfg` (admin).
 # Without aggressive, lid-close on AC may still trigger sleep.
 aggressive = true
 
 
 # ---------------------------------------------------------------------------
-# Built-in monitors — auto-detect agent activity from transcript files.
+# Built-in transcript monitors — auto-detect agent activity.
 #
-# Defaults are intentionally generous: an agent that hasn't written for 30
-# seconds is almost certainly still thinking. The shipped numbers come from
-# CodeIsland's production tuning:
+# These are ENABLED BY DEFAULT (no config needed). The defaults below are
+# the same as the shipped values; uncomment only to tune or disable.
 #
-#   claude_code        300s  (5 min — Claude extended-thinking can pause
-#                              several minutes between transcript writes)
-#   codex               90s  (Codex turns are shorter but still bursty)
-#
-# Override per-name to disable or tune. If your workflow has even longer
-# silent thinks (e.g. waiting on a manual approval), bump higher.
+#   Threshold rationale (ported from CodeIsland production tuning):
+#     monitoredThinkingTimeout       = 300 s   (Claude Code, pure-CLI agent)
+#     nativeAppTranscriptQuietTimeout =  90 s   (embedded native-app agents)
 # ---------------------------------------------------------------------------
 
-# [monitors.claude_code]
+# [monitors.claude_code]              # Anthropic Claude Code (CLI)
 # enabled = true
 # globs = ["~/.claude/projects/**/*.jsonl"]
 # idle_after_seconds = 300
 
-# [monitors.codex]
+# [monitors.codex]                    # OpenAI Codex CLI
 # enabled = true
 # globs = ["~/.codex/sessions/**/rollout-*.jsonl"]
 # idle_after_seconds = 90
 
-# Add custom monitors. The name is arbitrary; ``globs`` and
-# ``idle_after_seconds`` are required.
-# [monitors.my_pipeline]
-# globs = ["/var/log/my-agent/*.log"]
-# idle_after_seconds = 120
+# [monitors.cursor_agent]             # Cursor IDE agent
+# enabled = true
+# globs = ["~/.cursor/projects/**/agent-transcripts/*.jsonl"]
+# idle_after_seconds = 90
+
+# [monitors.qoder]                    # Qoder (Alibaba)
+# enabled = true
+# globs = ["~/.qoder/projects/**/transcript/*.jsonl"]
+# idle_after_seconds = 90
+
+# [monitors.codebuddy]                # CodeBuddy (Tencent)
+# enabled = true
+# globs = ["~/.codebuddy/projects/**/*.jsonl"]
+# idle_after_seconds = 90
 
 
 # ---------------------------------------------------------------------------
-# Optional: process-scan fallback. Useful for tools whose output you can't
-# easily monitor by file mtime. Disabled by default; ships with no patterns.
+# Custom monitors — for any tool not in the builtin list. Same shape.
+# Example: Aider's chat-history files.
+# ---------------------------------------------------------------------------
+
+# [monitors.aider]
+# globs = ["~/.aider.chat.history.md", "~/**/.aider.chat.history.md"]
+# idle_after_seconds = 120
+
+# [monitors.my_orchestrator]
+# globs = ["/var/log/my-pipeline/*.log"]
+# idle_after_seconds = 60
+
+
+# ---------------------------------------------------------------------------
+# Process-scan fallback — for agents that don't write a transcript file
+# (or where we don't know the path). Off by default. Setting
+# `use_builtins = true` enables a curated set of patterns covering 16 agents
+# CodeIsland tracks: Claude Code, Codex, Cursor, Qoder, CodeBuddy, OpenCode,
+# Gemini CLI, GitHub Copilot CLI, Trae, Trae CN, CodeBuddy CN, Droid (Factory),
+# StepFun, AntiGravity, WorkBuddy, Hermes, OpenWork.
 # ---------------------------------------------------------------------------
 
 [process_scan]
 enabled = false
+use_builtins = false   # set true to monitor every CLI/app in the curated list
+
+# Add your own regex patterns on top of (or instead of) the builtins.
 patterns = [
-    # "\\bcodex\\b",
-    # "\\bclaude\\b",
+    # "\\bmy-private-agent\\b",
 ]
+
+# Subtree filter: descendants whose `ps` line matches any of these are
+# treated as idle (so dev servers / language servers don't keep you awake).
 idle_patterns = [
     # "language-server",
     # "tsc --watch",

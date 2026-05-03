@@ -45,11 +45,11 @@ def test_glob_monitor_picks_newest(tmp_path: Path) -> None:
     assert result.newest_path == str(b)
 
 
-def test_default_monitors_includes_claude_and_codex() -> None:
+def test_default_monitors_covers_codeisland_transcripts() -> None:
+    """Every transcript-based agent CodeIsland supports must be a builtin."""
     monitors = build_default_monitors()
     names = {m.name for m in monitors}
-    assert "claude_code" in names
-    assert "codex" in names
+    assert names == {"claude_code", "codex", "cursor_agent", "qoder", "codebuddy"}
 
 
 def test_default_monitors_can_disable_via_overrides() -> None:
@@ -57,6 +57,25 @@ def test_default_monitors_can_disable_via_overrides() -> None:
     names = {m.name for m in monitors}
     assert "claude_code" not in names
     assert "codex" in names
+    assert "cursor_agent" in names
+
+
+def test_builtin_process_patterns_cover_codeisland_set() -> None:
+    """Make sure we ported every process-only agent from CodeIsland."""
+    from staywake.monitors import BUILTIN_PROCESS_PATTERNS, builtin_process_patterns_flat
+
+    expected = {
+        "claude_code", "codex", "cursor", "qoder", "codebuddy",
+        "opencode", "gemini_cli", "copilot_cli",
+        "trae", "trae_cn", "codebuddy_cn",
+        "droid", "stepfun", "antigravity", "workbuddy", "hermes", "openwork",
+    }
+    assert set(BUILTIN_PROCESS_PATTERNS) == expected
+    flat = builtin_process_patterns_flat()
+    assert len(flat) >= 30  # each agent contributes ≥1 pattern, most contribute 2-3
+    # Spot-check a few
+    assert any("@anthropic-ai/claude-code" in p for p in flat)
+    assert any("openwork" in p.lower() for p in flat)
 
 
 def test_builtin_defaults_match_production_tuning() -> None:

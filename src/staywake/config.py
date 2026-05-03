@@ -35,6 +35,7 @@ class Config:
     aggressive: bool = True
 
     process_scan_enabled: bool = False
+    process_scan_use_builtins: bool = False
     process_scan_patterns: List[str] = field(default_factory=list)
     process_scan_idle_patterns: List[str] = field(default_factory=list)
 
@@ -64,6 +65,7 @@ class Config:
         ps = data.get("process_scan", {}) if isinstance(data, dict) else {}
         if isinstance(ps, dict):
             cfg.process_scan_enabled = bool(ps.get("enabled", False))
+            cfg.process_scan_use_builtins = bool(ps.get("use_builtins", False))
             cfg.process_scan_patterns = [str(p) for p in ps.get("patterns", []) or []]
             cfg.process_scan_idle_patterns = [str(p) for p in ps.get("idle_patterns", []) or []]
 
