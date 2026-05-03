@@ -37,14 +37,20 @@ if [[ -z "${TARGET_PY}" ]]; then
     exit 1
 fi
 
-# Verify staywake importable for that interpreter.
-if ! sudo -u "${TARGET_USER}" "${TARGET_PY}" -c "import staywake" >/dev/null 2>&1; then
-    cat >&2 <<EOF
-error: 'staywake' is not importable for ${TARGET_USER}.
-       Install it first, e.g.:
-         pip install --user .
-       (run as ${TARGET_USER}, not as root)
-EOF
+# Make sure staywake is installed for the target user, and pull in any
+# changes since the last install (i.e., a fresh `git pull`). We always
+# --force-reinstall so the user can't end up with a daemon running an
+# older version than what's checked out — that's a confusing failure mode.
+REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+echo "=== installing/upgrading staywake from ${REPO_DIR} for ${TARGET_USER} ==="
+if ! sudo -u "${TARGET_USER}" "${TARGET_PY}" -m pip install --user --upgrade --force-reinstall --quiet "${REPO_DIR}"; then
+    echo "error: pip install failed for ${TARGET_USER}." >&2
+    exit 1
+fi
+
+# Sanity-check after install.
+if ! sudo -u "${TARGET_USER}" "${TARGET_PY}" -c "import staywake; print('  installed: staywake', staywake.__version__)"; then
+    echo "error: 'staywake' still not importable after install." >&2
     exit 1
 fi
 
