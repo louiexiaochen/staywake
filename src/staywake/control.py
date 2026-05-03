@@ -122,6 +122,17 @@ def write_control(ctrl: Control, path: Optional[Path] = None) -> None:
         except OSError:
             pass
         raise
+    # Match the holder-file behavior: if we're root, hand ownership back to
+    # the user so subsequent CLI reads/writes don't collide. (Realistically
+    # only the user's CLI writes this file today, but the daemon does call
+    # write_control() on auto-resume.)
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        try:
+            parent_stat = path.parent.stat()
+            os.chown(path, parent_stat.st_uid, parent_stat.st_gid)
+            os.chmod(path, 0o644)
+        except OSError:
+            pass
 
 
 def parse_duration(text: str) -> Optional[float]:

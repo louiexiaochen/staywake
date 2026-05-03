@@ -219,6 +219,23 @@ def _write_unlocked(path: Path, holders: Iterable[Holder]) -> None:
         except OSError:
             pass
         raise
+    # If we're running as root (the LaunchDaemon case), restore the file's
+    # ownership to whoever owns the parent directory and reset world-readable
+    # permissions. Otherwise the user's CLI later sees a 600 root-owned file,
+    # silently reads it as empty, and clobbers live holders on the next write.
+    _restore_user_ownership(path)
+
+
+def _restore_user_ownership(path: Path) -> None:
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        parent_stat = path.parent.stat()
+        os.chown(path, parent_stat.st_uid, parent_stat.st_gid)
+        os.chmod(path, 0o644)
+    except OSError:
+        # Best-effort; don't crash the daemon over this.
+        pass
 
 
 def read_holders(path: Path) -> list[Holder]:
