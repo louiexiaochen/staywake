@@ -42,9 +42,18 @@ if ! sudo -u "${TARGET_USER}" "${TARGET_PY}" -c "import staywake" >/dev/null 2>&
     cat >&2 <<EOF
 error: 'staywake' is not importable for ${TARGET_USER}.
        Install it first, e.g.:
-         pip install --user -e .
+         pip install --user .
        (run as ${TARGET_USER}, not as root)
 EOF
+    exit 1
+fi
+
+# launchd runs us as root. To let root's python find the user-installed
+# package, we forward the user's site-packages dir into the daemon's
+# environment via PYTHONPATH.
+TARGET_USER_SITE="$(sudo -u "${TARGET_USER}" "${TARGET_PY}" -c 'import site,sys; print(site.getusersitepackages())')"
+if [[ -z "${TARGET_USER_SITE}" || ! -d "${TARGET_USER_SITE}" ]]; then
+    echo "error: could not resolve user-site dir for ${TARGET_USER}." >&2
     exit 1
 fi
 
@@ -84,6 +93,11 @@ install_plist() {
     <string>--config-path</string>
     <string>${CONFIG_PATH}</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>${TARGET_USER_SITE}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
