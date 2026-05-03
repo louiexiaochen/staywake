@@ -1,30 +1,54 @@
-# staywake config — copy to ~/.config/staywake/config.toml
+# staywake config — copy to:
+#   macOS:   ~/.config/staywake/config.toml
+#   Windows: %APPDATA%\staywake\config.toml
 
 [daemon]
-# How often (seconds) the daemon polls sources.
+# How often (seconds) the daemon polls all sources.
 interval_seconds = 2.0
 
 # A holder whose `updatedAt` is older than this is treated as dead.
-# The Python context manager + library hold() refresh on every call,
-# so 10 minutes is plenty of headroom for typical usage.
 stale_after_seconds = 600
 
-# Toggle `pmset disablesleep 1` while active. Required for
-# "lid-close but keep running" — caffeinate alone doesn't block lid sleep.
-# Only effective if the daemon runs as root (which the LaunchDaemon does).
+# Stronger sleep blocking. On macOS toggles `pmset disablesleep` (root only);
+# on Windows toggles the lid action via `powercfg` (admin only).
+# Without aggressive, lid-close on AC may still trigger sleep.
 aggressive = true
 
 
-# Opt-in: also keep awake whenever certain processes are alive,
-# even without an explicit `staywake hold`. Useful for tools you can't modify.
+# ---------------------------------------------------------------------------
+# Built-in monitors — auto-detect agent activity from transcript files.
+# Override per-name to disable or tune. Leave the section empty to keep
+# default behavior (claude_code + codex enabled, 30s idle threshold).
+# ---------------------------------------------------------------------------
+
+# [monitors.claude_code]
+# enabled = true
+# globs = ["~/.claude/projects/**/*.jsonl"]
+# idle_after_seconds = 30
+
+# [monitors.codex]
+# enabled = true
+# globs = ["~/.codex/sessions/**/rollout-*.jsonl"]
+# idle_after_seconds = 30
+
+# Add custom monitors. The name is arbitrary; ``globs`` and
+# ``idle_after_seconds`` are required.
+# [monitors.my_pipeline]
+# globs = ["/var/log/my-agent/*.log"]
+# idle_after_seconds = 60
+
+
+# ---------------------------------------------------------------------------
+# Optional: process-scan fallback. Useful for tools whose output you can't
+# easily monitor by file mtime. Disabled by default; ships with no patterns.
+# ---------------------------------------------------------------------------
+
 [process_scan]
 enabled = false
 patterns = [
     # "\\bcodex\\b",
     # "\\bclaude\\b",
 ]
-# Subtree filter: a matched root counts as "idle" if all of its descendants
-# match these patterns (use this to ignore language servers, dev servers, etc.).
 idle_patterns = [
     # "language-server",
     # "tsc --watch",

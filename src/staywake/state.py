@@ -21,9 +21,9 @@ the daemon is the sole entity that prunes dead/stale holders.
 from __future__ import annotations
 
 import errno
-import fcntl
 import json
 import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -31,11 +31,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
+# Cross-platform exclusive file lock. fcntl on POSIX, msvcrt on Windows.
+if sys.platform == "win32":
+    import msvcrt  # type: ignore[import-not-found]
+    fcntl = None  # type: ignore[assignment]
+else:
+    import fcntl  # type: ignore[no-redef]
+    msvcrt = None  # type: ignore[assignment]
+
 
 def default_state_path() -> Path:
     env = os.environ.get("STAYWAKE_STATE_PATH")
     if env:
         return Path(env).expanduser()
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+        return Path(base) / "staywake" / "holders.json"
     base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return Path(base) / "staywake" / "holders.json"
 
@@ -87,6 +98,10 @@ def pid_alive(pid: Optional[int]) -> bool:
         return True
     if pid <= 0:
         return False
+
+    if sys.platform == "win32":
+        return _pid_alive_windows(pid)
+
     try:
         os.kill(pid, 0)
     except OSError as exc:
@@ -97,6 +112,25 @@ def pid_alive(pid: Optional[int]) -> bool:
             return True
         return False
     return True
+
+
+def _pid_alive_windows(pid: int) -> bool:  # pragma: no cover - exercised only on Windows
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong(0)
+        ok = k32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        if not ok:
+            return False
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        k32.CloseHandle(handle)
 
 
 def is_stale(holder: Holder, max_age_seconds: float) -> bool:
@@ -119,16 +153,34 @@ def is_live(holder: Holder, max_age_seconds: float) -> bool:
 
 @contextmanager
 def _locked(path: Path) -> Iterator[int]:
-    """Acquire an exclusive flock on a sibling lock file."""
+    """Acquire an exclusive lock on a sibling lock file (fcntl on POSIX, msvcrt on Windows)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        if sys.platform == "win32":
+            # msvcrt.locking blocks until granted; lock 1 byte at offset 0.
+            os.lseek(fd, 0, os.SEEK_SET)
+            while True:
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[union-attr]
+                    break
+                except OSError as exc:
+                    if exc.errno != errno.EDEADLK:
+                        raise
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX)  # type: ignore[union-attr]
         yield fd
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if sys.platform == "win32":
+                os.lseek(fd, 0, os.SEEK_SET)
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)  # type: ignore[union-attr]
+                except OSError:
+                    pass
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)  # type: ignore[union-attr]
         finally:
             os.close(fd)
 

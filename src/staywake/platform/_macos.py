@@ -1,19 +1,14 @@
-"""SleepGuard — own the lifetime of one ``caffeinate`` child + optional ``pmset``.
+"""macOS SleepGuard — wraps ``caffeinate -dimsu`` + optional ``pmset disablesleep``.
 
-Wraps two power knobs:
+* ``caffeinate -dimsu`` holds PreventDisplayIdleSleep, PreventUserIdleSystemSleep,
+  PreventDiskIdleSleep, **PreventSystemSleep** (the lid-close blocker on AC),
+  plus a synthetic user-activity tick. Killing the child releases everything
+  atomically.
 
-* ``caffeinate -dimsu``  — holds PreventDisplayIdleSleep, PreventUserIdleSystemSleep,
-  PreventDiskIdleSleep, **PreventSystemSleep** (the lid-close blocker on AC) and
-  fires a synthetic user activity tick. The assertions live as long as the
-  child process; killing it releases them all atomically.
-
-* ``pmset -a disablesleep 1`` — system-wide "computer never sleeps" toggle.
-  Stronger than caffeinate (covers edge cases where assertions get GC'd) but
-  requires root and survives across processes, so we *must* restore it on
-  shutdown. ``aggressive=False`` skips it entirely.
-
-Designed to be idempotent: ``start()`` is safe to call when already running,
-``stop()`` is safe to call when already stopped.
+* ``pmset -a disablesleep 1`` is the system-wide "computer never sleeps"
+  toggle. Stronger than caffeinate but requires root and persists across
+  processes, so we *must* restore it on shutdown. ``aggressive=False`` skips
+  it entirely.
 """
 
 from __future__ import annotations
@@ -31,13 +26,6 @@ CAFFEINATE_FLAGS = ["-dimsu"]
 
 
 def _orphan_caffeinate_sweep() -> int:
-    """Best-effort kill any prior ``caffeinate -dimsu`` left by a crashed daemon.
-
-    We only target the exact flag combo we use, so we don't step on
-    user-launched ``caffeinate`` invocations.
-
-    Returns the count we believe we reaped (best-effort; pkill tells us 0/1).
-    """
     try:
         proc = subprocess.run(
             ["pkill", "-f", f"caffeinate {CAFFEINATE_FLAGS[0]}"],
@@ -50,14 +38,12 @@ def _orphan_caffeinate_sweep() -> int:
         return 0
 
 
-class SleepGuard:
+class MacOSSleepGuard:
     def __init__(self, aggressive: bool = False) -> None:
         self.aggressive = aggressive
         self._caffeinate: Optional[subprocess.Popen[str]] = None
         self._changed_disablesleep = False
         self._warned_root = False
-
-    # ----- lifecycle -------------------------------------------------------
 
     def start(self) -> None:
         if self._caffeinate is None or self._caffeinate.poll() is not None:
@@ -93,13 +79,10 @@ class SleepGuard:
             logger.info("Restored pmset disablesleep=0.")
 
     def cleanup(self) -> None:
-        # Defensive: catch every error so that atexit / signal paths can't fail.
         try:
             self.stop()
-        except Exception as exc:  # pragma: no cover - best-effort
+        except Exception as exc:  # pragma: no cover
             logger.warning("cleanup ignored exception: %s", exc)
-
-    # ----- introspection ---------------------------------------------------
 
     @property
     def is_running(self) -> bool:
@@ -111,6 +94,12 @@ class SleepGuard:
             return None
         return self._caffeinate.pid  # type: ignore[union-attr]
 
+    def describe(self) -> str:
+        parts = ["caffeinate=" + (str(self.caffeinate_pid) if self.is_running else "off")]
+        if self.aggressive:
+            parts.append(f"pmset_disablesleep={self.disablesleep_state()}")
+        return " ".join(parts)
+
     def disablesleep_state(self) -> str:
         if not self.aggressive:
             return "n/a"
@@ -118,12 +107,10 @@ class SleepGuard:
             return "no-root"
         return "1" if self._read_disablesleep() else "0"
 
-    # ----- pmset internals -------------------------------------------------
-
     def _enable_disablesleep(self) -> None:
         if os.geteuid() != 0:
             if not self._warned_root:
-                logger.warning("aggressive mode requested but not running as root; pmset skipped.")
+                logger.warning("aggressive mode requested but not root; pmset skipped.")
                 self._warned_root = True
             return
         if self._read_disablesleep():
