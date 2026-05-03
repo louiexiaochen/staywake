@@ -19,6 +19,55 @@ claude
 # … your agent finishes → file mtime stops moving → daemon releases → laptop sleeps
 ```
 
+## Supported agents
+
+Out of the box, **zero config needed**:
+
+| Agent | How it's detected | Idle threshold | Source |
+|---|---|---|---|
+| **Claude Code** (CLI) | `~/.claude/projects/**/*.jsonl` mtime | 300 s | builtin monitor `claude_code` |
+| **Claude Code** (alt session dir) | `~/.claude/sessions/**/*.jsonl` mtime | 300 s | builtin monitor `claude_code_logs` |
+| **OpenAI Codex CLI** | `~/.codex/sessions/**/rollout-*.jsonl` mtime | 90 s | builtin monitor `codex` |
+
+The 300/90 s thresholds are tuned to ride out long thinking pauses without
+prematurely "letting go" while the agent is mid-LLM-call.
+
+### Adding your own agent (no code change)
+
+Drop a snippet in `~/.config/staywake/config.toml` (macOS) or
+`%APPDATA%\staywake\config.toml` (Windows):
+
+```toml
+# Examples — pick whichever matches your tool's log/transcript layout.
+
+[monitors.opencode]
+globs = ["~/.local/share/opencode/sessions/**/*.json*"]
+idle_after_seconds = 120
+
+[monitors.aider]
+globs = ["~/.aider.chat.history.md", "~/**/.aider.chat.history.md"]
+idle_after_seconds = 120
+
+[monitors.cursor_agent]
+globs = ["~/.cursor/logs/agent/**/*.log"]
+idle_after_seconds = 120
+
+[monitors.my_orchestrator]
+globs = ["/var/log/my-pipeline/*.log"]
+idle_after_seconds = 60
+```
+
+If your tool doesn't write a transcript file at all, you have two more
+escape hatches:
+
+1. **Wrap the launcher** with `staywake hold` / `staywake release` — works
+   for anything that runs in a shell (see "Manual hold" below).
+2. **Process-scan fallback** — match by `ps` regex; opt-in via
+   `[process_scan]` in the same config file.
+
+PRs adding new built-in monitors are welcome — if it ships with a
+predictable transcript path, we'll bake it in.
+
 ## Why a daemon
 
 * **macOS**: `caffeinate` alone doesn't block lid-close on AC; you need
