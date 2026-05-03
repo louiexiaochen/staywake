@@ -119,11 +119,40 @@ PLIST
     chmod 644 "${PLIST_DEST}"
     chown root:wheel "${PLIST_DEST}"
 
-    # Re-bootstrap (idempotent).
+    # Re-bootstrap (idempotent). Both bootout and bootstrap are async-ish
+    # and racy with KeepAlive respawns of a crash-looping daemon, so we
+    # poll for unload and retry bootstrap on EIO/EBUSY.
     if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
-        launchctl bootout "system/${LABEL}" || true
+        echo "  -> already loaded, booting out first"
+        launchctl bootout "system/${LABEL}" 2>/dev/null || true
+        # Wait for it to actually leave the registry.
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            if ! launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+        done
+        # Belt-and-braces: if the previous daemon was stuck in a respawn
+        # loop, KeepAlive may have orphaned a python process for a moment.
+        pkill -f "staywake.cli daemon" 2>/dev/null || true
     fi
-    launchctl bootstrap system "${PLIST_DEST}"
+
+    # Bootstrap with retry — we sometimes see "5: Input/output error" right
+    # after a noisy bootout if launchd's IPC channel is still settling.
+    bootstrap_ok=false
+    for attempt in 1 2 3 4 5; do
+        if launchctl bootstrap system "${PLIST_DEST}" 2>/dev/null; then
+            bootstrap_ok=true
+            break
+        fi
+        echo "  -> bootstrap attempt ${attempt} failed, retrying in 2s"
+        sleep 2
+    done
+    if ! $bootstrap_ok; then
+        echo "error: launchctl bootstrap kept failing. Try manually:" >&2
+        echo "  sudo launchctl bootstrap system ${PLIST_DEST}" >&2
+        exit 1
+    fi
     launchctl enable "system/${LABEL}"
 
     echo "installed: ${PLIST_DEST}"
