@@ -17,25 +17,34 @@ aggressive = true
 
 # ---------------------------------------------------------------------------
 # Built-in monitors — auto-detect agent activity from transcript files.
-# Override per-name to disable or tune. Leave the section empty to keep
-# default behavior (claude_code + codex enabled, 30s idle threshold).
+#
+# Defaults are intentionally generous: an agent that hasn't written for 30
+# seconds is almost certainly still thinking. The shipped numbers come from
+# CodeIsland's production tuning:
+#
+#   claude_code        300s  (5 min — Claude extended-thinking can pause
+#                              several minutes between transcript writes)
+#   codex               90s  (Codex turns are shorter but still bursty)
+#
+# Override per-name to disable or tune. If your workflow has even longer
+# silent thinks (e.g. waiting on a manual approval), bump higher.
 # ---------------------------------------------------------------------------
 
 # [monitors.claude_code]
 # enabled = true
 # globs = ["~/.claude/projects/**/*.jsonl"]
-# idle_after_seconds = 30
+# idle_after_seconds = 300
 
 # [monitors.codex]
 # enabled = true
 # globs = ["~/.codex/sessions/**/rollout-*.jsonl"]
-# idle_after_seconds = 30
+# idle_after_seconds = 90
 
 # Add custom monitors. The name is arbitrary; ``globs`` and
 # ``idle_after_seconds`` are required.
 # [monitors.my_pipeline]
 # globs = ["/var/log/my-agent/*.log"]
-# idle_after_seconds = 60
+# idle_after_seconds = 120
 
 
 # ---------------------------------------------------------------------------

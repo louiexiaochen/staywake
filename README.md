@@ -82,7 +82,11 @@ on lid-action handling.
 ```
 
 A monitor is **active** if any matching file's mtime is within
-``idle_after_seconds`` (default 30s).
+``idle_after_seconds``. Defaults are deliberately generous —
+**300s for Claude Code**, **90s for Codex** — because extended thinking,
+huge-context calls, and waitingApproval routinely create multi-minute
+gaps between transcript writes that should *not* be confused with
+"agent finished". Tune per monitor in TOML.
 
 A holder is **live** if its PID is alive *and* its `updatedAt` isn't stale.
 A crashed agent → PID dies → daemon drops it on next tick. No supervision

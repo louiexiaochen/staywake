@@ -90,23 +90,38 @@ class GlobMonitor:
 # Built-in defaults — opinionated, but each can be disabled in TOML.
 # ---------------------------------------------------------------------------
 
+# Idle thresholds by agent — generous on purpose.
+#
+# An agent is *not* idle just because the transcript paused. Extended thinking,
+# big LLM calls, slow tool round-trips, and waitingApproval all create gaps in
+# the file-write stream that should NOT be confused with "agent finished".
+# Numbers below are ported from CodeIsland's production tuning:
+#
+#   * Claude Code (`monitoredThinkingTimeout`): 300s = 5 min. Long thinks
+#     and large-context calls regularly produce 2–4 min silent stretches.
+#   * OpenAI Codex CLI (`nativeAppTranscriptQuietTimeout`): 90s. Turns are
+#     shorter but still bursty; 90s clears most thinking pauses without
+#     leaving the laptop awake forever after the user wandered off.
+#
+# Override per-monitor in TOML if your workflow differs.
 BUILTIN_MONITORS: dict[str, dict] = {
     # Claude Code CLI: appends to a JSONL per session under
     # ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
     "claude_code": {
         "globs": ["~/.claude/projects/**/*.jsonl"],
-        "idle_after_seconds": 30.0,
+        "idle_after_seconds": 300.0,
     },
     # OpenAI Codex CLI: rotated rollout files under
     # ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
     "codex": {
         "globs": ["~/.codex/sessions/**/rollout-*.jsonl"],
-        "idle_after_seconds": 30.0,
+        "idle_after_seconds": 90.0,
     },
-    # Claude Code's session_id-based plain logs (some setups). Harmless if absent.
+    # Claude Code's session_id-based plain logs (some setups). Same threshold
+    # as claude_code; harmless if the directory doesn't exist.
     "claude_code_logs": {
         "globs": ["~/.claude/sessions/**/*.jsonl"],
-        "idle_after_seconds": 30.0,
+        "idle_after_seconds": 300.0,
     },
 }
 

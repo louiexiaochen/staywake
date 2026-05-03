@@ -59,6 +59,19 @@ def test_default_monitors_can_disable_via_overrides() -> None:
     assert "codex" in names
 
 
+def test_builtin_defaults_match_production_tuning() -> None:
+    """Lock in the CodeIsland-derived idle thresholds.
+
+    These are NOT 30s. Extended thinking, large-context LLM calls, and
+    waitingApproval all create multi-minute gaps in transcript writes that
+    must not be confused with "agent finished".
+    """
+    from staywake.monitors import BUILTIN_MONITORS
+
+    assert BUILTIN_MONITORS["claude_code"]["idle_after_seconds"] == 300.0
+    assert BUILTIN_MONITORS["codex"]["idle_after_seconds"] == 90.0
+
+
 def test_default_monitors_extra_added(tmp_path: Path) -> None:
     monitors = build_default_monitors(
         extra={"my_tool": {"globs": [str(tmp_path / "*.log")], "idle_after_seconds": 5}}
