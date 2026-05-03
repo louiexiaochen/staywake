@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "staywake"
+version = "0.1.0"
+description = "Keep your Mac awake while agents/long jobs are running — even with the lid closed. Sleep again the moment they're done."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "staywake contributors" }]
+keywords = ["macos", "caffeinate", "agents", "ai", "sleep", "lid", "launchd", "claude-code", "codex"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: System :: Power (UPS)",
+    "Topic :: Utilities",
+]
+dependencies = []
+
+[project.optional-dependencies]
+toml = ["tomli>=2.0; python_version<'3.11'"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+staywake = "staywake.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+staywake = ["py.typed"]

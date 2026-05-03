@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Install the staywake LaunchDaemon system-wide.
+#
+#   sudo ./packaging/install.sh                 # install + bootstrap
+#   sudo ./packaging/install.sh --uninstall     # bootout + remove
+#
+# Requires that `staywake` be importable. We resolve the binary path of the
+# user's pip-installed CLI via `python3 -m staywake.cli`, which avoids
+# hard-coding /usr/local/bin and works for `pip install --user`.
+set -euo pipefail
+
+LABEL="dev.staywake.daemon"
+PLIST_DEST="/Library/LaunchDaemons/${LABEL}.plist"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE="${SCRIPT_DIR}/${LABEL}.plist.template"
+
+if [[ "${EUID}" -ne 0 ]]; then
+    echo "error: must run as root (sudo)." >&2
+    exit 1
+fi
+
+# Resolve target user. SUDO_USER is the invoking user, not root.
+TARGET_USER="${SUDO_USER:-${USER}}"
+TARGET_HOME="$(eval echo "~${TARGET_USER}")"
+
+STATE_PATH="${TARGET_HOME}/.local/state/staywake/holders.json"
+CONFIG_PATH="${TARGET_HOME}/.config/staywake/config.toml"
+
+# Find the python that has staywake installed (prefer target user's env).
+RESOLVE_PY="
+import shutil, sys
+print(sys.executable)
+"
+TARGET_PY="$(sudo -u "${TARGET_USER}" python3 -c "${RESOLVE_PY}" 2>/dev/null || true)"
+if [[ -z "${TARGET_PY}" ]]; then
+    echo "error: python3 not found for user ${TARGET_USER}." >&2
+    exit 1
+fi
+
+# Verify staywake importable for that interpreter.
+if ! sudo -u "${TARGET_USER}" "${TARGET_PY}" -c "import staywake" >/dev/null 2>&1; then
+    cat >&2 <<EOF
+error: 'staywake' is not importable for ${TARGET_USER}.
+       Install it first, e.g.:
+         pip install --user -e .
+       (run as ${TARGET_USER}, not as root)
+EOF
+    exit 1
+fi
+
+# We launch the daemon via "<python> -m staywake.cli daemon", which needs the
+# launchd ProgramArguments array to start with the python binary, not staywake.
+STAYWAKE_BIN="${TARGET_PY}"
+
+uninstall() {
+    if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+        launchctl bootout "system/${LABEL}" || true
+    fi
+    rm -f "${PLIST_DEST}"
+    echo "uninstalled."
+}
+
+install_plist() {
+    mkdir -p "$(dirname "${PLIST_DEST}")"
+    sudo -u "${TARGET_USER}" mkdir -p "$(dirname "${STATE_PATH}")" "$(dirname "${CONFIG_PATH}")"
+
+    # Build a slightly different ProgramArguments — we need:
+    #   <python> -m staywake.cli daemon --state-path ... --config-path ...
+    cat > "${PLIST_DEST}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${STAYWAKE_BIN}</string>
+    <string>-m</string>
+    <string>staywake.cli</string>
+    <string>daemon</string>
+    <string>--state-path</string>
+    <string>${STATE_PATH}</string>
+    <string>--config-path</string>
+    <string>${CONFIG_PATH}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/var/log/staywake.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/staywake.log</string>
+</dict>
+</plist>
+PLIST
+
+    chmod 644 "${PLIST_DEST}"
+    chown root:wheel "${PLIST_DEST}"
+
+    # Re-bootstrap (idempotent).
+    if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+        launchctl bootout "system/${LABEL}" || true
+    fi
+    launchctl bootstrap system "${PLIST_DEST}"
+    launchctl enable "system/${LABEL}"
+
+    echo "installed: ${PLIST_DEST}"
+    echo "  user:        ${TARGET_USER}"
+    echo "  state path:  ${STATE_PATH}"
+    echo "  config path: ${CONFIG_PATH}"
+    echo "  log:         /var/log/staywake.log"
+    echo
+    echo "Try it:"
+    echo "  sudo -u ${TARGET_USER} staywake hold demo --reason test"
+    echo "  sudo -u ${TARGET_USER} staywake status"
+    echo "  pgrep -fl 'caffeinate -dimsu'"
+    echo "  sudo -u ${TARGET_USER} staywake release demo"
+}
+
+if [[ "${1:-}" == "--uninstall" ]]; then
+    uninstall
+else
+    install_plist
+fi
