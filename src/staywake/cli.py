@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import api
+from . import control as ctrl
 from .config import Config, default_config_path
 from .daemon import run_daemon
 from .state import default_state_path
@@ -62,9 +63,16 @@ def cmd_release(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     cfg = Config.load(args.config_path)
     info = api.status(state_path=args.state_path, stale_after_seconds=cfg.stale_after_seconds)
+    control = ctrl.read_control(args.control_path)
     if args.json:
-        print(json.dumps(info, ensure_ascii=False, indent=2))
+        out = dict(info)
+        out["control"] = control.to_json()
+        print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
+    if control.paused:
+        print(f"\033[33mPAUSED\033[0m  {control.describe()}")
+    else:
+        print("\033[32mrunning\033[0m")
     print(f"state file: {info['state_path']}")
     print(f"live holders: {info['live_count']}  active: {info['active']}")
     if info["holders"]:
@@ -77,9 +85,35 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pause(args: argparse.Namespace) -> int:
+    duration: Optional[float] = None
+    if args.for_:
+        duration = ctrl.parse_duration(args.for_)
+        if duration is None or duration <= 0:
+            print(f"error: could not parse duration {args.for_!r}; use e.g. 30s, 5m, 1h", file=sys.stderr)
+            return 2
+    state = ctrl.pause(reason=args.reason or "", duration_seconds=duration, path=args.control_path)
+    if args.json:
+        print(json.dumps(state.to_json(), ensure_ascii=False))
+    else:
+        print(state.describe())
+    return 0
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    ctrl.resume(path=args.control_path)
+    if not args.json:
+        print("resumed")
+    return 0
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     cfg = Config.load(args.config_path)
-    return run_daemon(state_path=args.state_path, config=cfg) or 0
+    return run_daemon(
+        state_path=args.state_path,
+        config=cfg,
+        control_path=args.control_path,
+    ) or 0
 
 
 def cmd_config_path(_args: argparse.Namespace) -> int:
@@ -101,6 +135,12 @@ def _add_common(p: argparse.ArgumentParser) -> None:
         type=Path,
         default=None,
         help=f"Override TOML config (default: {default_config_path()}).",
+    )
+    p.add_argument(
+        "--control-path",
+        type=Path,
+        default=None,
+        help=f"Override pause control file (default: {ctrl.default_control_path()}).",
     )
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--json", action="store_true", help="Machine-readable output.")
@@ -128,6 +168,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_st = sub.add_parser("status", help="Show current holders + active state.")
     _add_common(p_st)
     p_st.set_defaults(func=cmd_status)
+
+    p_pause = sub.add_parser(
+        "pause",
+        help="Pause the daemon (stop blocking sleep) without sudo.",
+    )
+    p_pause.add_argument("--reason", default="", help="Why you're pausing — saved for status output.")
+    p_pause.add_argument(
+        "--for",
+        dest="for_",
+        default="",
+        help="Auto-resume after this duration. Examples: 30s, 5m, 1h, 8h. Omit for indefinite.",
+    )
+    _add_common(p_pause)
+    p_pause.set_defaults(func=cmd_pause)
+
+    p_resume = sub.add_parser("resume", help="Resume the daemon (clear pause).")
+    _add_common(p_resume)
+    p_resume.set_defaults(func=cmd_resume)
 
     p_dae = sub.add_parser("daemon", help="Run the daemon in the foreground.")
     p_dae.add_argument("--foreground", action="store_true", help="(default) — kept for clarity in plist args.")

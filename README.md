@@ -100,6 +100,22 @@ Just install. The daemon ships with built-in monitors for Claude Code
 (`~/.claude/projects/**/*.jsonl`) and OpenAI Codex CLI
 (`~/.codex/sessions/**/rollout-*.jsonl`).
 
+### Pause / resume (no sudo)
+
+Sometimes you actually *want* the laptop to sleep — you're writing prose,
+or going to bed, or just curious. The daemon supports a soft pause that
+needs no privileges:
+
+```sh
+staywake pause --reason "going to bed"      # paused indefinitely
+staywake pause --for 1h                     # auto-resumes after 1 hour
+staywake resume                             # back to normal
+staywake status                             # shows PAUSED state prominently
+```
+
+When paused, the daemon stays running but short-circuits to idle on every
+tick. If `--for` was set, it auto-resumes the moment that timer expires.
+
 ### Manual hold (CLI)
 
 ```sh

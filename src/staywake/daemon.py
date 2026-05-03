@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
+from .control import default_control_path, read_control, resume as resume_control
 from .monitors import build_default_monitors
 from .platform import SleepGuard
 from .sources import HolderSource, ProcessSource
@@ -21,8 +22,10 @@ logger = logging.getLogger(__name__)
 def run_daemon(
     state_path: Optional[Path] = None,
     config: Optional[Config] = None,
+    control_path: Optional[Path] = None,
 ) -> int:
     state_path = state_path or default_state_path()
+    control_path = control_path or default_control_path()
     config = config or Config.load()
 
     guard = SleepGuard(aggressive=config.aggressive)
@@ -59,7 +62,31 @@ def run_daemon(
     )
 
     keeping = False
+    paused_logged = False
     while True:
+        # 0. Soft pause — user-writable, no sudo. Short-circuits everything.
+        ctrl = read_control(control_path)
+        if ctrl.auto_resume_due:
+            logger.info("Auto-resume timer expired; clearing pause.")
+            resume_control(control_path)
+            ctrl = read_control(control_path)
+            paused_logged = False
+
+        if ctrl.paused:
+            if not paused_logged:
+                logger.info("Paused (%s); will not engage sleep guard.", ctrl.describe())
+                paused_logged = True
+            if keeping:
+                logger.info("Releasing sleep guard because pause was requested.")
+                guard.stop()
+                keeping = False
+            time.sleep(config.interval_seconds)
+            continue
+
+        if paused_logged:
+            logger.info("Resumed.")
+            paused_logged = False
+
         holder_result = holder_src.poll()
         proc_result = proc_src.poll()
         monitor_results = [m.poll() for m in monitors]
